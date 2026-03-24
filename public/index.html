@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Private Chat</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: #0d0d0d; color: #eee; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #login-screen { background: #1a1a2e; padding: 40px; border-radius: 16px; width: 320px; text-align: center; }
+  #login-screen h2 { margin-bottom: 8px; color: #e94560; font-size: 1.5rem; }
+  #login-screen p { color: #aaa; margin-bottom: 24px; font-size: 0.9rem; }
+  select, input[type=password] { width: 100%; padding: 12px; margin-bottom: 14px; border-radius: 8px; border: 1px solid #333; background: #0d0d0d; color: #eee; font-size: 1rem; }
+  button { width: 100%; padding: 12px; background: #e94560; border: none; border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; font-weight: bold; }
+  button:hover { background: #c73652; }
+  #error-msg { color: #e94560; margin-top: 12px; font-size: 0.85rem; min-height: 20px; }
+
+  #chat-screen { display: none; flex-direction: column; width: 100%; max-width: 500px; height: 100vh; }
+  #chat-header { background: #1a1a2e; padding: 16px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #333; }
+  #chat-header .avatar { width: 40px; height: 40px; border-radius: 50%; background: #e94560; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.1rem; }
+  #chat-header .name { font-weight: bold; font-size: 1rem; }
+  #chat-header .status { font-size: 0.75rem; color: #4caf50; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #0d0d0d; }
+  .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 0.95rem; line-height: 1.4; word-break: break-word; }
+  .msg.mine { background: #e94560; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .msg.hers { background: #1a1a2e; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .msg .time { font-size: 0.7rem; opacity: 0.7; margin-top: 4px; text-align: right; }
+  #input-area { padding: 12px 16px; background: #1a1a2e; display: flex; gap: 10px; border-top: 1px solid #333; }
+  #msg-input { flex: 1; padding: 12px; border-radius: 24px; border: 1px solid #333; background: #0d0d0d; color: #eee; font-size: 0.95rem; outline: none; }
+  #send-btn { padding: 12px 20px; background: #e94560; border: none; border-radius: 24px; color: white; cursor: pointer; font-size: 1rem; font-weight: bold; }
+  #send-btn:hover { background: #c73652; }
+  .empty-state { text-align: center; color: #555; margin: auto; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <h2>💌 Private Chat</h2>
+  <p>Just the two of us.</p>
+  <select id="user-select">
+    <option value="">Select who you are...</option>
+    <option value="ami">Ami</option>
+    <option value="her">HER_NAME_PLACEHOLDER</option>
+  </select>
+  <input type="password" id="password-input" placeholder="Enter your password" />
+  <button onclick="doLogin()">Enter</button>
+  <div id="error-msg"></div>
+</div>
+
+<!-- CHAT -->
+<div id="chat-screen">
+  <div id="chat-header">
+    <div class="avatar" id="other-avatar">?</div>
+    <div>
+      <div class="name" id="other-name">...</div>
+      <div class="status">● Online</div>
+    </div>
+  </div>
+  <div id="messages"><div class="empty-state">Say hello 💌</div></div>
+  <div id="input-area">
+    <input type="text" id="msg-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()" />
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+  const SERVER = window.location.origin;
+  let currentUser = null;
+  let pollInterval = null;
+  let lastCount = 0;
+
+  function doLogin() {
+    const user = document.getElementById('user-select').value;
+    const pass = document.getElementById('password-input').value;
+    if (!user) { document.getElementById('error-msg').textContent = 'Please select who you are.'; return; }
+    if (!pass) { document.getElementById('error-msg').textContent = 'Please enter your password.'; return; }
+
+    fetch(`${SERVER}/login`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user, password: pass })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        currentUser = user;
+        const otherName = data.otherName;
+        document.getElementById('other-name').textContent = otherName;
+        document.getElementById('other-avatar').textContent = otherName[0].toUpperCase();
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('chat-screen').style.display = 'flex';
+        loadMessages();
+        pollInterval = setInterval(loadMessages, 2000);
+      } else {
+        document.getElementById('error-msg').textContent = 'Wrong password. Try again.';
+      }
+    })
+    .catch(() => { document.getElementById('error-msg').textContent = 'Cannot connect to server.'; });
+  }
+
+  function loadMessages() {
+    fetch(`${SERVER}/messages`)
+    .then(r => r.json())
+    .then(msgs => {
+      if (msgs.length === lastCount) return;
+      lastCount = msgs.length;
+      const box = document.getElementById('messages');
+      if (msgs.length === 0) {
+        box.innerHTML = '<div class="empty-state">Say hello 💌</div>';
+        return;
+      }
+      box.innerHTML = msgs.map(m => {
+        const mine = m.user === currentUser;
+        const t = new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        return `<div class="msg ${mine ? 'mine' : 'hers'}">${escHtml(m.text)}<div class="time">${t}</div></div>`;
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    });
+  }
+
+  function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    fetch(`${SERVER}/send`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user: currentUser, text })
+    }).then(() => loadMessages());
+  }
+
+  function escHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
